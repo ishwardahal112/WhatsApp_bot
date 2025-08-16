@@ -1,7 +1,8 @@
 // app.js
 
 // आवश्यक लाइब्रेरी आयात करें
-const { Client, LocalAuth } = require('whatsapp-web.js'); // LocalAuth अब सही ढंग से उपयोग किया जा रहा है
+// LocalAuth को अब सीधे पैकेज से आयात किया गया है
+const { Client, LocalAuth } = require('whatsapp-web.js'); 
 const qrcode = require('qrcode'); // QR कोड जेनरेट करने के लिए
 const express = require('express'); // एक वेब सर्वर बनाने के लिए
 const { initializeApp } = require('firebase/app'); // Firebase ऐप इनिशियलाइज़ करने के लिए
@@ -174,7 +175,7 @@ function initializeWhatsappClient() {
     });
 
     client.on('auth_failure', async (msg) => {
-        console.error('प्रमाणीकरण विफल हुआ! सेशन साफ़ कर रहे हैं...');
+        console.error('प्रमाणीकरण विफल हुआ! सेशन साफ़ कर रहे हैं...', msg); // msg भी लॉग करें
         qrCodeData = 'प्रमाणीकरण विफल हुआ। कृपया सेवा पुनरारंभ करें और QR कोड को फिर से स्कैन करें।';
         savedSession = null; // अमान्य सेशन को साफ़ करें
         await saveBotConfigToFirestore(); // Firestore अपडेट करें
@@ -414,58 +415,51 @@ app.get('/', async (req, res) => {
     }
 });
 
-// नया, हल्का एंडपॉइंट केवल पिंगिंग के लिए
 app.get('/ping', (req, res) => {
-    res.send('OK'); // सिर्फ एक छोटा सा "ओके" जवाब भेजें
+    res.send('OK');
 });
 
 
-// मालिक की स्थिति को बदलने के लिए API एंडपॉइंट
 app.get('/toggle_owner_status', async (req, res) => {
     if (!db || !userId) {
         return res.status(500).send("Firebase इनिशियलाइज़ नहीं हुआ या यूजर ID उपलब्ध नहीं।");
     }
     isOwnerOnline = !isOwnerOnline;
     await saveBotConfigToFirestore();
-    res.redirect('/'); // स्टेटस पेज पर रीडायरेक्ट करें
+    res.redirect('/');
 });
 
-// पर्सनल असिस्टेंट मोड को बदलने के लिए API एंडपॉइंट
 app.get('/toggle_personal_assistant', async (req, res) => {
     if (!db || !userId) {
         return res.status(500).send("Firebase इनिशियलाइज़ नहीं हुआ या यूजर ID उपलब्ध नहीं।");
     }
     isPersonalAssistantMode = !isPersonalAssistantMode;
     await saveBotConfigToFirestore();
-    res.redirect('/'); // स्टेटस पेज पर रीडायरेक्ट करें
+    res.redirect('/');
 });
 
-// WhatsApp सेशन को मैन्युअल रूप से लॉगआउट करने का एंडपॉइंट
 app.get('/logout', async (req, res) => {
     if (client && isClientReady) {
         console.log('WhatsApp क्लाइंट लॉगआउट कर रहे हैं...');
-        await client.logout(); // WhatsApp से लॉगआउट करें
-        savedSession = null; // सेव किए गए सेशन को साफ़ करें
-        qrCodeData = 'QR code is not generated yet. Please wait...'; // QR स्थिति को रीसेट करें
-        await saveBotConfigToFirestore(); // Firestore से सेशन डेटा को हटाएँ
-        isClientReady = false; // क्लाइंट की रेडी स्थिति को रीसेट करें
-        res.redirect('/'); // स्थिति पेज पर रीडायरेक्ट करें
+        await client.logout();
+        savedSession = null;
+        qrCodeData = 'QR code is not generated yet. Please wait...';
+        await saveBotConfigToFirestore();
+        isClientReady = false;
+        res.redirect('/');
     } else {
         res.status(400).send('WhatsApp क्लाइंट तैयार नहीं है या पहले से लॉगआउट है।');
     }
 });
 
 
-// एक्सप्रेस सर्वर को शुरू करें
 app.listen(port, async () => {
     console.log(`सर्वर http://localhost:${port} पर चल रहा है`);
-    // Firebase प्रमाणीकरण पूरा होने और कॉन्फ़िग लोड होने की प्रतीक्षा करें
     if (db && userId) {
-        await loadBotConfigFromFirestore(); // पहले कॉन्फ़िग और सेशन लोड करें
-        initializeWhatsappClient(); // फिर WhatsApp क्लाइंट इनिशियलाइज़ करें
+        await loadBotConfigFromFirestore();
+        initializeWhatsappClient();
     } else {
         console.error("Firebase इनिशियलाइज़ नहीं हुआ, WhatsApp क्लाइंट शुरू नहीं हो सकता।");
-        // यदि Firebase इनिशियलाइज़ नहीं हुआ, तो भी क्लाइंट शुरू करने का प्रयास करें (सेशन परसिस्टेंस के बिना)
-        initializeWhatsappClient(); 
+        initializeWhatsappClient();
     }
 });
