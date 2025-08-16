@@ -1,7 +1,7 @@
 // app.js
 
 // आवश्यक लाइब्रेरी आयात करें
-const { Client } = require('whatsapp-web.js'); // LocalAuth को हटा दिया गया क्योंकि हम कस्टम सेशन मैनेजमेंट कर रहे हैं
+const { Client, LocalAuth } = require('whatsapp-web.js'); // LocalAuth अब सही ढंग से उपयोग किया जा रहा है
 const qrcode = require('qrcode'); // QR कोड जेनरेट करने के लिए
 const express = require('express'); // एक वेब सर्वर बनाने के लिए
 const { initializeApp } = require('firebase/app'); // Firebase ऐप इनिशियलाइज़ करने के लिए
@@ -129,10 +129,8 @@ function initializeWhatsappClient() {
         console.log('सेव्ड सेशन के साथ क्लाइंट इनिशियलाइज़ करने का प्रयास कर रहे हैं...');
     } else {
         console.log('कोई सेव्ड सेशन नहीं मिला, QR कोड के लिए क्लाइंट इनिशियलाइज़ करेंगे...');
-        // अगर कोई लोकल सेशन नहीं है, तो LocalAuth का उपयोग करें ताकि यह लोकल फाइल सिस्टम पर QR/सेशन बनाए
-        // नोट: Render पर यह अस्थायी होगा, लेकिन हमें पहली बार QR जनरेशन के लिए इसकी आवश्यकता है।
-        // कस्टम AuthStrategy के बिना, हम wwebjs की LocalAuth फाइल मैनेजमेंट को सीधे बदल नहीं सकते।
-        clientOptions.authStrategy = new Client.LocalAuth();
+        // LocalAuth को सही कंस्ट्रक्टर के रूप में उपयोग करें
+        clientOptions.authStrategy = new LocalAuth(); 
     }
 
     client = new Client(clientOptions);
