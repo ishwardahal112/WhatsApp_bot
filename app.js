@@ -12,7 +12,7 @@ const { getAuth, signInAnonymously, signInWithCustomToken } = require('firebase/
 const app = express();
 const port = process.env.PORT || 3000; // Render पोर्ट को ऑटोमेटिकली सेट करता है
 
-// Firebase कॉन्फ़िगरेशन और ऐप ID को Render पर्यावरण चर से प्राप्त करें
+// Firebase कॉन्फ़िग और ऐप ID को Render पर्यावरण चर से प्राप्त करें
 const firebaseConfig = process.env.FIREBASE_CONFIG ? JSON.parse(process.env.FIREBASE_CONFIG) : {};
 const appId = process.env.__APP_ID || 'default-app-id'; // '__APP_ID' Render द्वारा प्रदान किया जाता है
 const initialAuthToken = process.env.__INITIAL_AUTH_TOKEN || null; // '__INITIAL_AUTH_TOKEN' Render द्वारा प्रदान किया जाता है
@@ -216,7 +216,7 @@ client.on('message', async msg => {
 
     // 3. यदि मैसेज मालिक का नहीं है, और मालिक ऑफ़लाइन है, तो AI जवाब दे
     if (!isOwnerOnline) { // यह 'isOwnerOnline' Firestore से लोड किया गया मान है
-        console.log('मालिक ऑफ़लाइन है, बॉट अन्य यूज़र्स को जवाब देगा।');
+        // console.log('मालिक ऑफ़लाइन है, बॉट अन्य यूज़र्स को जवाब देगा।'); // यह मैसेज अब कंसोल में नहीं दिखेगा
         await handleBotResponse(msg);
     } else {
         console.log('मालिक ऑनलाइन है, बॉट अन्य यूज़र्स को जवाब नहीं देगा।');
@@ -230,10 +230,11 @@ async function handleBotResponse(msg) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ""; // Render env var से प्राप्त करें
 
     if (!GEMINI_API_KEY) {
-        botResponseText = 'क्षमा करें, AI कुंजी कॉन्फ़िग नहीं है। मैं अभी आपके अनुरोध को संसाधित नहीं कर सकता।';
+        botResponseText = 'मालिक अभी उपलब्ध नहीं हैं और AI सहायक भी कॉन्फ़िगर नहीं है। कृपया थोड़ी देर बाद फिर से कोशिश करें।';
     } else {
         try {
-            const prompt = `मुझे इस उपयोगकर्ता के संदेश का एक संक्षिप्त, सहायक जवाब दें, यह मानते हुए कि मैं एक सहायक बॉट हूँ। संदेश: "${messageBody}"`;
+            // प्रॉम्प्ट को दोस्ताना, देसी भाषा में जवाब देने के लिए अपडेट किया गया
+            const prompt = `इस संदेश का जवाब एक दोस्ताना, देसी और सहायक अंदाज़ में दें। मालिक अभी उपलब्ध नहीं है और मैं उनका सहायक बॉट हूँ। संदेश: "${messageBody}"`;
             let chatHistoryForGemini = [];
             chatHistoryForGemini.push({ role: "user", parts: [{ text: prompt }] });
 
@@ -261,7 +262,7 @@ async function handleBotResponse(msg) {
                         break; // सफलता, लूप से बाहर निकलें
                     } else {
                         console.warn("Gemini API ने अपेक्षित संरचना या सामग्री नहीं लौटाई।", result);
-                        botResponseText = 'क्षमा करें, मैं अभी आपके अनुरोध को समझ नहीं पा रहा हूँ।'; // फॉलबैक
+                        botResponseText = 'माफ़ करना, मैं अभी आपकी बात नहीं समझ पा रहा हूँ। शायद मालिक जल्दी ही जवाब दें।'; // फॉलबैक
                         break; // इसे संभाला हुआ मानें, लेकिन फॉलबैक के साथ
                     }
                 } catch (error) {
@@ -272,18 +273,18 @@ async function handleBotResponse(msg) {
                         await new Promise(resolve => setTimeout(resolve, delay));
                         console.log(`Gemini API कॉल का पुनः प्रयास कर रहा है (प्रयास ${retries}/${maxRetries})...`);
                     } else {
-                        botResponseText = 'क्षमा करें, AI जवाब देने में असमर्थ है।'; // रिट्री के बाद फॉलबैक
+                        botResponseText = 'माफ़ करना, AI जवाब देने में असमर्थ है। कुछ तकनीकी दिक्कत आ गई है।'; // रिट्री के बाद फॉलबैक
                     }
                 }
             }
         } catch (error) {
             console.error('बॉट मैसेज जनरेट करने या भेजने में त्रुटि:', error);
-            botResponseText = 'क्षमा करें, एक तकनीकी समस्या आ गई है।';
+            botResponseText = 'माफ़ करना, एक तकनीकी समस्या आ गई है। मालिक को सूचित कर दिया गया है।';
         }
     }
-    // AI Assistant Replied prefix जोड़ें
-    await msg.reply(`AI Assistant Replied: ${botResponseText}`); // msg.reply() सीधे मूल संदेश का जवाब देता है
-    console.log(`[बॉट का जवाब] ${msg.from}: "AI Assistant Replied: ${botResponseText}"`);
+    // 'AI Assistant Replied:' प्रीफिक्स हटा दिया गया है
+    await msg.reply(botResponseText); // msg.reply() सीधे मूल संदेश का जवाब देता है
+    console.log(`[बॉट का जवाब] ${msg.from}: "${botResponseText}"`);
 }
 
 
