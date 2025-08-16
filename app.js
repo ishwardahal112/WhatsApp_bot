@@ -1,7 +1,6 @@
 // app.js
 
 // आवश्यक लाइब्रेरी आयात करें
-// LocalAuth को अब सीधे पैकेज से आयात किया गया है
 const { Client, LocalAuth } = require('whatsapp-web.js'); 
 const qrcode = require('qrcode'); // QR कोड जेनरेट करने के लिए
 const express = require('express'); // एक वेब सर्वर बनाने के लिए
@@ -25,7 +24,7 @@ let isOwnerOnline = true; // डिफ़ॉल्ट रूप से ऑनल
 let isPersonalAssistantMode = false; // डिफ़ॉल्ट रूप से पर्सनल असिस्टेंट मोड बंद
 let qrCodeData = 'QR code is not generated yet. Please wait...'; // QR कोड डेटा (Base64)
 let isClientReady = false;
-let savedSession = null; // WhatsApp सेशन ऑब्जेक्ट को यहां स्टोर किया जाएगा
+let savedSession = null; // WhatsApp सेशन ऑब्जेक्ट को यहां स्टोर किया जाएगा (या JSON स्ट्रिंग)
 
 // Firebase को इनिशियलाइज़ करें
 if (Object.keys(firebaseConfig).length > 0) {
@@ -75,7 +74,8 @@ async function loadBotConfigFromFirestore() {
             isOwnerOnline = data.isOwnerOnline !== undefined ? data.isOwnerOnline : true;
             isPersonalAssistantMode = data.isPersonalAssistantMode !== undefined ? data.isPersonalAssistantMode : false;
             qrCodeData = data.lastQrCodeData || 'QR code is not generated yet. Please wait...';
-            savedSession = data.session || null; // सेशन ऑब्जेक्ट लोड करें
+            // सेशन JSON स्ट्रिंग को ऑब्जेक्ट में पार्स करें
+            savedSession = data.session ? JSON.parse(data.session) : null; 
             console.log(`Firestore से बॉट कॉन्फ़िग लोड हुआ: मालिक ऑनलाइन=${isOwnerOnline}, पर्सनल असिस्टेंट मोड=${isPersonalAssistantMode}, सेशन मौजूद=${!!savedSession}`);
         } else {
             // यदि स्थिति मौजूद नहीं है, तो डिफ़ॉल्ट रूप से इनिशियलाइज़ करें
@@ -99,9 +99,10 @@ async function saveBotConfigToFirestore() {
     }
     const configDocRef = doc(db, `artifacts/${appId}/users/${userId}/whatsappBotConfig`, 'status');
     try {
-        // सभी वर्तमान स्थितियाँ, और savedSession भी सहेजें
-        await setDoc(configDocRef, { isOwnerOnline, isPersonalAssistantMode, lastQrCodeData: qrCodeData, session: savedSession });
-        console.log(`बॉट कॉन्फ़िग Firestore में सहेजी गई: मालिक ऑनलाइन=${isOwnerOnline}, पर्सनल असिस्टेंट मोड=${isPersonalAssistantMode}, सेशन सेव्ड=${!!savedSession}`);
+        // सेशन ऑब्जेक्ट को JSON स्ट्रिंग के रूप में सहेजें
+        const sessionToSave = savedSession ? JSON.stringify(savedSession) : null;
+        await setDoc(configDocRef, { isOwnerOnline, isPersonalAssistantMode, lastQrCodeData: qrCodeData, session: sessionToSave });
+        console.log(`बॉट कॉन्फ़िग Firestore में सहेजी गई: मालिक ऑनलाइन=${isOwnerOnline}, पर्सनल असिस्टेंट मोड=${isPersonalAssistantMode}, सेशन सेव्ड=${!!sessionToSave}`);
     } catch (error) {
         console.error("Firestore में बॉट कॉन्फ़िग सहेजने में त्रुटि:", error);
     }
@@ -130,7 +131,6 @@ function initializeWhatsappClient() {
         console.log('सेव्ड सेशन के साथ क्लाइंट इनिशियलाइज़ करने का प्रयास कर रहे हैं...');
     } else {
         console.log('कोई सेव्ड सेशन नहीं मिला, QR कोड के लिए क्लाइंट इनिशियलाइज़ करेंगे...');
-        // LocalAuth को सही कंस्ट्रक्टर के रूप में उपयोग करें
         clientOptions.authStrategy = new LocalAuth(); 
     }
 
@@ -140,21 +140,23 @@ function initializeWhatsappClient() {
     client.on('qr', async qr => {
         console.log('QR कोड प्राप्त हुआ। इसे वेब पेज पर प्रदर्शित किया जाएगा और Firestore में सहेजा जाएगा।');
         qrCodeData = await qrcode.toDataURL(qr);
-        // QR कोड डेटा को Firestore में सहेजें ताकि वेब पेज पर दिख सके
         await saveBotConfigToFirestore(); 
     });
 
     client.on('ready', async () => {
         isClientReady = true;
         console.log('WhatsApp क्लाइंट तैयार है! बॉट अब काम कर रहा है।');
-        const botOwnId = client.info.wid._serialized; // बॉट का अपना WhatsApp ID
-        if (botOwnId) {
+        // client.info मौजूद है या नहीं, इसकी जाँच करें
+        if (client.info && client.info.wid) { 
+            const botOwnId = client.info.wid._serialized; // बॉट का अपना WhatsApp ID
             try {
                 await client.sendMessage(botOwnId, 'बॉट सफलतापूर्वक कनेक्ट हो गया है और अब आपके पर्सनल असिस्टेंट के रूप में कार्य करने के लिए तैयार है!');
                 console.log(`कनेक्शन कन्फर्मेशन मैसेज ${botOwnId} को भेजा गया।`);
             } catch (error) {
                 console.error('कनेक्शन कन्फर्मेशन मैसेज भेजने में त्रुटि:', error);
             }
+        } else {
+            console.warn('client.info.wid उपलब्ध नहीं है जब क्लाइंट तैयार है।');
         }
     });
 
@@ -164,18 +166,22 @@ function initializeWhatsappClient() {
         savedSession = session; // नए/मान्य सेशन ऑब्जेक्ट को स्टोर करें
         qrCodeData = 'WhatsApp क्लाइंट प्रमाणित है और ऑनलाइन है!'; // वेब पेज पर स्थिति अपडेट करें
         await saveBotConfigToFirestore(); // सेशन ऑब्जेक्ट और अपडेटेड QR मैसेज को Firestore में सहेजें
-        const botOwnId = client.info.wid._serialized;
-        if (botOwnId) {
-             try {
-                 await client.sendMessage(botOwnId, 'आपका WhatsApp सेशन अब सेव हो गया है! अब आपको बार-बार QR स्कैन करने की ज़रूरत नहीं पड़ेगी (जब तक आप मैन्युअल रूप से लॉगआउट न करें या सेशन अमान्य न हो जाए)।');
-             } catch (error) {
-                 console.error('सेशन सेव्ड कन्फर्मेशन मैसेज भेजने में त्रुटि:', error);
-             }
-         }
+        
+        // client.info मौजूद है या नहीं, इसकी जाँच करें
+        if (client.info && client.info.wid) {
+            const botOwnId = client.info.wid._serialized;
+            try {
+                await client.sendMessage(botOwnId, 'आपका WhatsApp सेशन अब सेव हो गया है! अब आपको बार-बार QR स्कैन करने की ज़रूरत नहीं पड़ेगी (जब तक आप मैन्युअल रूप से लॉगआउट न करें या सेशन अमान्य न हो जाए)।');
+            } catch (error) {
+                console.error('सेशन सेव्ड कन्फर्मेशन मैसेज भेजने में त्रुटि:', error);
+            }
+        } else {
+            console.warn('client.info.wid उपलब्ध नहीं है जब क्लाइंट प्रमाणित है।');
+        }
     });
 
     client.on('auth_failure', async (msg) => {
-        console.error('प्रमाणीकरण विफल हुआ! सेशन साफ़ कर रहे हैं...', msg); // msg भी लॉग करें
+        console.error('प्रमाणीकरण विफल हुआ! सेशन साफ़ कर रहे हैं...', msg); 
         qrCodeData = 'प्रमाणीकरण विफल हुआ। कृपया सेवा पुनरारंभ करें और QR कोड को फिर से स्कैन करें।';
         savedSession = null; // अमान्य सेशन को साफ़ करें
         await saveBotConfigToFirestore(); // Firestore अपडेट करें
@@ -183,11 +189,9 @@ function initializeWhatsappClient() {
 
     client.on('disconnected', async (reason) => {
         console.log('WhatsApp डिस्कनेक्ट हो गया:', reason);
-        // डिस्कनेक्ट होने पर सेशन साफ़ करें ताकि फिर से प्रमाणीकरण या नया QR स्कैन हो
-        savedSession = null;
+        savedSession = null; // सेशन को साफ़ करें
         qrCodeData = 'QR कोड जनरेट नहीं हुआ है। कृपया प्रतीक्षा करें...'; // QR को रीसेट करें
         await saveBotConfigToFirestore();
-        // client.initialize(); // वैकल्पिक: स्वचालित रूप से पुनः इनिशियलाइज़ करें
     });
 
     // WhatsApp पर मैसेज आने पर
@@ -216,7 +220,7 @@ function initializeWhatsappClient() {
                 } else {
                     await client.sendMessage(senderId, 'आप पहले से ही ऑनलाइन हैं।');
                 }
-                return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+                return; 
             } else if (lowerCaseMessage === 'online false') {
                 if (isOwnerOnline) {
                     isOwnerOnline = false;
@@ -226,7 +230,7 @@ function initializeWhatsappClient() {
                 } else {
                     await client.sendMessage(senderId, 'आप पहले से ही ऑफ़लाइन हैं।');
                 }
-                return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+                return; 
             } else if (lowerCaseMessage === 'assistant on') {
                 if (!isPersonalAssistantMode) {
                     isPersonalAssistantMode = true;
@@ -236,7 +240,7 @@ function initializeWhatsappClient() {
                 } else {
                     await client.sendMessage(senderId, 'पर्सनल असिस्टेंट मोड पहले से ही चालू है।');
                 }
-                return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+                return; 
             } else if (lowerCaseMessage === 'assistant off') {
                 if (isPersonalAssistantMode) {
                     isPersonalAssistantMode = false;
@@ -246,25 +250,22 @@ function initializeWhatsappClient() {
                 } else {
                     await client.sendMessage(senderId, 'पर्सनल असिस्टेंट मोड पहले से ही बंद है।');
                 }
-                return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+                return; 
             }
 
-            // यदि मालिक का मैसेज कोई कमांड नहीं है, और पर्सनल असिस्टेंट मोड ऑन है, तो AI जवाब दे
             if (isPersonalAssistantMode) {
                 console.log('मालिक का मैसेज, पर्सनल असिस्टेंट मोड चालू है, बॉट जवाब देगा।');
                 await handleBotResponse(msg);
                 return;
             } else {
-                // पर्सनल असिस्टेंट मोड ऑफ है, इसलिए मालिक को जवाब न दें
                 return;
             }
         }
 
-        // 3. यदि मैसेज मालिक का नहीं है, और मालिक ऑफ़लाइन है, तो AI जवाब दे
         if (!isOwnerOnline) { 
             await handleBotResponse(msg);
         } else {
-            // मालिक ऑनलाइन है, बॉट अन्य यूज़र्स को जवाब नहीं देगा।
+            console.log('मालिक ऑनलाइन है, बॉट अन्य यूज़र्स को जवाब नहीं देगा।');
         }
     });
 
@@ -281,7 +282,6 @@ async function handleBotResponse(msg) {
         botResponseText = 'माफ़ करना, मैं अभी जवाब नहीं दे पा रहा हूँ। कृपया थोड़ी देर बाद फिर से कोशिश करें।';
     } else {
         try {
-            // प्रॉम्प्ट को छोटे, दोस्ताना और सामान्य यूज़र जैसे जवाब के लिए अपडेट किया गया
             const prompt = `इस संदेश का जवाब एक छोटे, दोस्ताना, देसी और सहायक अंदाज़ में दें। इसे ऐसा लगना चाहिए जैसे कोई आम इंसान जवाब दे रहा हो। संदेश: "${messageBody}"`;
             let chatHistoryForGemini = [];
             chatHistoryForGemini.push({ role: "user", parts: [{ text: prompt }] });
@@ -307,11 +307,11 @@ async function handleBotResponse(msg) {
                         result.candidates[0].content && result.candidates[0].content.parts &&
                         result.candidates[0].content.parts.length > 0) {
                         botResponseText = result.candidates[0].content.parts[0].text;
-                        break; // सफलता, लूप से बाहर निकलें
+                        break; 
                     } else {
                         console.warn("Gemini API ने अपेक्षित संरचना या सामग्री नहीं लौटाई।", result);
                         botResponseText = 'माफ़ करना, मैं अभी आपकी बात नहीं समझ पा रहा हूँ।'; // फॉलबैक
-                        break; // इसे संभाला हुआ मानें, लेकिन फॉलबैक के साथ
+                        break; 
                     }
                 } catch (error) {
                     console.error(`Gemini API कॉल में त्रुटि (प्रयास ${retries + 1}/${maxRetries}):`, error);
@@ -330,14 +330,13 @@ async function handleBotResponse(msg) {
             botResponseText = 'माफ़ करना, एक तकनीकी समस्या आ गई है।';
         }
     }
-    await msg.reply(botResponseText); // msg.reply() सीधे मूल संदेश का जवाब देता है
+    await msg.reply(botResponseText); 
     console.log(`[बॉट का जवाब] ${msg.from}: "${botResponseText}"`);
 }
 
 
 // वेब सर्वर सेटअप
 app.get('/', async (req, res) => {
-    // सुनिश्चित करें कि Firebase डेटा लोड हो गया है
     if (db && userId) {
         await loadBotConfigFromFirestore();
     }
@@ -456,10 +455,15 @@ app.get('/logout', async (req, res) => {
 app.listen(port, async () => {
     console.log(`सर्वर http://localhost:${port} पर चल रहा है`);
     if (db && userId) {
-        await loadBotConfigFromFirestore();
-        initializeWhatsappClient();
+        // Firebase Auth पूरा होने तक प्रतीक्षा करें
+        // loadBotConfigFromFirestore() signInUser() के अंदर कॉल किया जाता है,
+        // इसलिए सुनिश्चित करें कि signInUser() पहले चला हो और userId सेट हो।
+        // इसके लिए एक छोटी सी देरी या ऑन-स्टेट-चेंज लिसनर अधिक मजबूत हो सकता है।
+        // अभी के लिए, हम मान लेते हैं कि signInUser() जल्दी हो जाता है।
+        await loadBotConfigFromFirestore(); // पहले कॉन्फ़िग और सेशन लोड करें
+        initializeWhatsappClient(); // फिर WhatsApp क्लाइंट इनिशियलाइज़ करें
     } else {
-        console.error("Firebase इनिशियलाइज़ नहीं हुआ, WhatsApp क्लाइंट शुरू नहीं हो सकता।");
-        initializeWhatsappClient();
+        console.error("Firebase कॉन्फ़िग या USER ID उपलब्ध नहीं। WhatsApp क्लाइंट बिना परसिस्टेंस के शुरू होगा।");
+        initializeWhatsappClient(); 
     }
 });
