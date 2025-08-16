@@ -21,6 +21,7 @@ let db;
 let auth;
 let userId; // Firebase यूजर ID
 let isOwnerOnline = true; // डिफ़ॉल्ट रूप से ऑनलाइन (यह Firestore से ओवरराइड होगा)
+let isPersonalAssistantMode = false; // डिफ़ॉल्ट रूप से पर्सनल असिस्टेंट मोड बंद
 
 // Firebase को इनिशियलाइज़ करें
 if (Object.keys(firebaseConfig).length > 0) {
@@ -40,7 +41,7 @@ if (Object.keys(firebaseConfig).length > 0) {
                     userId = userCredential.user.uid;
                 }
                 console.log("Firebase प्रमाणित। User ID:", userId);
-                await loadOwnerStatusFromFirestore(); // प्रमाणीकरण के बाद स्थिति लोड करें
+                await loadBotConfigFromFirestore(); // प्रमाणीकरण के बाद स्थिति लोड करें
             } catch (error) {
                 console.error("Firebase प्रमाणीकरण त्रुटि:", error);
                 userId = crypto.randomUUID(); // यदि प्रमाणीकरण विफल रहता है तो एक रैंडम ID उपयोग करें
@@ -56,47 +57,52 @@ if (Object.keys(firebaseConfig).length > 0) {
     userId = crypto.randomUUID(); // Firebase कॉन्फ़िग के बिना एक रैंडम ID उपयोग करें
 }
 
-// Firestore से मालिक की ऑनलाइन स्थिति लोड करें
-async function loadOwnerStatusFromFirestore() {
+// Firestore से बॉट कॉन्फ़िगरेशन लोड करें
+async function loadBotConfigFromFirestore() {
     if (!db || !userId) {
-        console.warn("Firestore या User ID उपलब्ध नहीं, स्थिति लोड नहीं हो सकती।");
+        console.warn("Firestore या User ID उपलब्ध नहीं, कॉन्फ़िग लोड नहीं हो सकती।");
         return;
     }
     const configDocRef = doc(db, `artifacts/${appId}/users/${userId}/whatsappBotConfig`, 'status');
     try {
         const docSnap = await getDoc(configDocRef);
         if (docSnap.exists()) {
-            isOwnerOnline = docSnap.data().isOwnerOnline;
-            console.log(`Firestore से मालिक की स्थिति लोड हुई: ${isOwnerOnline ? 'ऑनलाइन' : 'ऑफ़लाइन'}`);
+            const data = docSnap.data();
+            isOwnerOnline = data.isOwnerOnline !== undefined ? data.isOwnerOnline : true; // डिफ़ॉल्ट ट्रू
+            isPersonalAssistantMode = data.isPersonalAssistantMode !== undefined ? data.isPersonalAssistantMode : false; // डिफ़ॉल्ट फॉल्स
+            // QR कोड डेटा को भी लोड करें
+            qrCodeData = data.lastQrCodeData || 'QR code is not generated yet. Please wait...';
+            console.log(`Firestore से बॉट कॉन्फ़िग लोड हुआ: मालिक ऑनलाइन=${isOwnerOnline}, पर्सनल असिस्टेंट मोड=${isPersonalAssistantMode}`);
         } else {
-            // यदि स्थिति मौजूद नहीं है, तो डिफ़ॉल्ट रूप से 'ऑनलाइन' पर सेट करें और सहेजें
+            // यदि स्थिति मौजूद नहीं है, तो डिफ़ॉल्ट रूप से इनिशियलाइज़ करें
             isOwnerOnline = true;
-            await setDoc(configDocRef, { isOwnerOnline: true });
-            console.log("मालिक की स्थिति Firestore में इनिशियलाइज़ की गई: ऑनलाइन");
+            isPersonalAssistantMode = false;
+            await setDoc(configDocRef, { isOwnerOnline: true, isPersonalAssistantMode: false, lastQrCodeData: qrCodeData });
+            console.log("बॉट कॉन्फ़िग Firestore में इनिशियलाइज़ की गई: मालिक ऑनलाइन, पर्सनल असिस्टेंट मोड ऑफ।");
         }
     } catch (error) {
-        console.error("Firestore से मालिक की स्थिति लोड करने में त्रुटि:", error);
+        console.error("Firestore से बॉट कॉन्फ़िग लोड करने में त्रुटि:", error);
     }
 }
 
-// Firestore में मालिक की स्थिति सहेजें
-async function saveOwnerStatusToFirestore() {
+// Firestore में बॉट कॉन्फ़िगरेशन सहेजें
+async function saveBotConfigToFirestore() {
     if (!db || !userId) {
-        console.warn("Firestore या User ID उपलब्ध नहीं, स्थिति सहेजी नहीं जा सकती।");
+        console.warn("Firestore या User ID उपलब्ध नहीं, कॉन्फ़िग सहेजी नहीं जा सकती।");
         return;
     }
     const configDocRef = doc(db, `artifacts/${appId}/users/${userId}/whatsappBotConfig`, 'status');
     try {
-        await setDoc(configDocRef, { isOwnerOnline });
-        console.log(`मालिक की स्थिति Firestore में सहेजी गई: ${isOwnerOnline ? 'ऑनलाइन' : 'ऑफ़लाइन'}`);
+        await setDoc(configDocRef, { isOwnerOnline, isPersonalAssistantMode, lastQrCodeData: qrCodeData });
+        console.log(`बॉट कॉन्फ़िग Firestore में सहेजी गई: मालिक ऑनलाइन=${isOwnerOnline}, पर्सनल असिस्टेंट मोड=${isPersonalAssistantMode}`);
     } catch (error) {
-        console.error("Firestore में मालिक की स्थिति सहेजने में त्रुटि:", error);
+        console.error("Firestore में बॉट कॉन्फ़िग सहेजने में त्रुटि:", error);
     }
 }
 
 
 // WhatsApp क्लाइंट को इनिशियलाइज़ करें
-let qrCodeData = 'QR code is not generated yet. Please wait...';
+let qrCodeData = 'QR code is not generated yet. Please wait...'; // यह Firestore से लोड हो सकता है
 let isClientReady = false;
 
 const client = new Client({
@@ -115,17 +121,18 @@ const client = new Client({
 
 // WhatsApp इवेंट लिसनर
 client.on('qr', async qr => {
-    console.log('QR कोड प्राप्त हुआ। इसे वेब पेज पर प्रदर्शित किया जाएगा।');
+    console.log('QR कोड प्राप्त हुआ। इसे वेब पेज पर प्रदर्शित किया जाएगा और Firestore में सहेजा जाएगा।');
     qrCodeData = await qrcode.toDataURL(qr);
+    await saveBotConfigToFirestore(); // QR कोड डेटा को Firestore में सहेजें
 });
 
 client.on('ready', async () => {
     isClientReady = true;
     console.log('WhatsApp क्लाइंट तैयार है! बॉट अब काम कर रहा है।');
     // सुनिश्चित करें कि स्थिति लोड हो गई है और क्लाइंट तैयार होने के बाद सही है
-    await loadOwnerStatusFromFirestore();
+    await loadBotConfigFromFirestore();
 
-    // कनेक्टेड यूजर को कन्फर्मेशन मैसेज भेजें
+    // कनेक्टेड यूजर को कन्फर्मेशन मैसेज भेजें (केवल अगर पहली बार कनेक्ट हुआ है या रीस्टार्ट हुआ है)
     const botOwnId = client.info.wid._serialized; // बॉट का अपना WhatsApp ID
     if (botOwnId) {
         try {
@@ -145,116 +152,146 @@ client.on('message', async msg => {
 
     console.log(`[मैसेज प्राप्त] ${senderId}: "${messageBody}"`);
 
-    // 1. मालिक द्वारा भेजे गए स्थिति परिवर्तन कमांड को हैंडल करें
+    // 1. यदि मैसेज बॉट द्वारा भेजा गया है, तो उसे अनदेखा करें
+    if (msg.fromMe) {
+        return;
+    }
+
+    // 2. मालिक द्वारा भेजे गए स्थिति परिवर्तन कमांड को हैंडल करें
     if (botOwnId && senderId === botOwnId) { // केवल तभी जब मैसेज खुद मालिक से आया हो
         const lowerCaseMessage = messageBody.toLowerCase().trim();
-        if (lowerCaseMessage === 'set online true') {
+
+        if (lowerCaseMessage === 'online true') {
             if (!isOwnerOnline) {
                 isOwnerOnline = true;
-                await saveOwnerStatusToFirestore();
+                await saveBotConfigToFirestore();
                 await client.sendMessage(senderId, 'आपकी स्थिति अब: ऑनलाइन। बॉट अब अन्य यूज़र्स को जवाब नहीं देगा।');
                 console.log("मालिक ने अपनी स्थिति ऑनलाइन पर सेट की।");
             } else {
                 await client.sendMessage(senderId, 'आप पहले से ही ऑनलाइन हैं।');
             }
             return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
-        } else if (lowerCaseMessage === 'set online false') {
+        } else if (lowerCaseMessage === 'online false') {
             if (isOwnerOnline) {
                 isOwnerOnline = false;
-                await saveOwnerStatusToFirestore();
+                await saveBotConfigToFirestore();
                 await client.sendMessage(senderId, 'आपकी स्थिति अब: ऑफ़लाइन। बॉट अब अन्य यूज़र्स को जवाब देगा।');
                 console.log("मालिक ने अपनी स्थिति ऑफलाइन पर सेट की।");
             } else {
                 await client.sendMessage(senderId, 'आप पहले से ही ऑफ़लाइन हैं।');
             }
             return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
-        }
-    }
-
-    // 2. यदि मैसेज मालिक का नहीं है या मालिक का कमांड नहीं है, और यह बॉट द्वारा भेजा गया मैसेज नहीं है, तो सामान्य बॉट लॉजिक
-    if (msg.fromMe) { // सुनिश्चित करें कि हम अपने स्वयं के भेजे गए संदेशों को अनदेखा कर रहे हैं
-        return;
-    }
-
-    if (!isOwnerOnline) { // यह 'isOwnerOnline' Firestore से लोड किया गया मान है
-        console.log('मालिक ऑफ़लाइन है, बॉट जवाब देगा।');
-        let botResponseText = '';
-
-        // साधारण कीवर्ड-आधारित सीमित जवाब
-        if (messageBody.toLowerCase().includes('hi') || messageBody.toLowerCase().includes('hello') || messageBody.toLowerCase().includes('नमस्ते')) {
-            botResponseText = 'नमस्ते! मैं अभी थोड़ी देर के लिए अनुपलब्ध हूँ। आपका मैसेज महत्वपूर्ण है, मैं जल्द ही आपको जवाब दूंगा।';
-        } else if (messageBody.toLowerCase().includes('how are you') || messageBody.toLowerCase().includes('क्या हाल है') || messageBody.toLowerCase().includes('कैसे हो')) {
-            botResponseText = 'मैं एक बॉट हूँ और ठीक काम कर रहा हूँ। अभी मेरा मालिक उपलब्ध नहीं है।';
-        } else {
-            // वास्तविक Google Gemini API कॉल
-            const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ""; // Render env var से प्राप्त करें
-
-            if (!GEMINI_API_KEY) {
-                botResponseText = 'मालिक ऑफ़लाइन है और AI कुंजी कॉन्फ़िगर नहीं है। मैं अभी आपके अनुरोध को संसाधित नहीं कर सकता।';
+        } else if (lowerCaseMessage === 'assistant on') {
+            if (!isPersonalAssistantMode) {
+                isPersonalAssistantMode = true;
+                await saveBotConfigToFirestore();
+                await client.sendMessage(senderId, 'आपका पर्सनल असिस्टेंट मोड अब चालू है। मैं आपके संदेशों का जवाब दूंगा।');
+                console.log("मालिक ने पर्सनल असिस्टेंट मोड चालू किया।");
             } else {
-                try {
-                    const prompt = `मुझे इस उपयोगकर्ता के संदेश का एक संक्षिप्त, सहायक जवाब दें, यह मानते हुए कि मेरा मालिक अभी ऑफ़लाइन है और मैं उसका सहायक बॉट हूँ। संदेश: "${messageBody}"`;
-                    let chatHistoryForGemini = [];
-                    // इस सरल मुफ्त संस्करण के लिए, हम प्रति उपयोगकर्ता चैट इतिहास को बनाए नहीं रखेंगे।
-                    // संदर्भ के लिए, आपको अधिक मजबूत डेटाबेस की आवश्यकता हो सकती है।
-                    chatHistoryForGemini.push({ role: "user", parts: [{ text: prompt }] });
-
-                    const payload = { contents: chatHistoryForGemini };
-                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`;
-
-                    let response;
-                    let result;
-                    let retries = 0;
-                    const maxRetries = 5;
-                    const baseDelay = 1000; // 1 second
-
-                    while (retries < maxRetries) {
-                        try {
-                            response = await fetch(apiUrl, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(payload)
-                            });
-                            result = await response.json();
-                            if (result.candidates && result.candidates.length > 0 &&
-                                result.candidates[0].content && result.candidates[0].content.parts &&
-                                result.candidates[0].content.parts.length > 0) {
-                                botResponseText = result.candidates[0].content.parts[0].text;
-                                break; // सफलता, लूप से बाहर निकलें
-                            } else {
-                                console.warn("Gemini API ने अपेक्षित संरचना या सामग्री नहीं लौटाई।", result);
-                                botResponseText = 'क्षमा करें, मैं अभी आपके अनुरोध को समझ नहीं पा रहा हूँ। मेरा मालिक जल्द ही वापस आएगा।'; // फॉलबैक
-                                break; // इसे संभाला हुआ मानें, लेकिन फॉलबैक के साथ
-                            }
-                        } catch (error) {
-                            console.error(`Gemini API कॉल में त्रुटि (प्रयास ${retries + 1}/${maxRetries}):`, error);
-                            retries++;
-                            if (retries < maxRetries) {
-                                const delay = baseDelay * Math.pow(2, retries - 1);
-                                await new Promise(resolve => setTimeout(resolve, delay));
-                                console.log(`Gemini API कॉल का पुनः प्रयास कर रहा है (प्रयास ${retries}/${maxRetries})...`);
-                            } else {
-                                botResponseText = 'क्षमा करें, AI जवाब देने में असमर्थ है। मेरा मालिक जल्द ही वापस आएगा।'; // रिट्री के बाद फॉलबैक
-                            }
-                        }
-                    }
-                } catch (error) {
-                    console.error('बॉट मैसेज जनरेट करने या भेजने में त्रुटि:', error);
-                    botResponseText = 'क्षमा करें, एक तकनीकी समस्या आ गई है। मेरा मालिक जल्द ही वापस आएगा।';
-                }
+                await client.sendMessage(senderId, 'पर्सनल असिस्टेंट मोड पहले से ही चालू है।');
             }
+            return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+        } else if (lowerCaseMessage === 'assistant off') {
+            if (isPersonalAssistantMode) {
+                isPersonalAssistantMode = false;
+                await saveBotConfigToFirestore();
+                await client.sendMessage(senderId, 'आपका पर्सनल असिस्टेंट मोड अब बंद है। मैं आपके संदेशों का जवाब नहीं दूंगा।');
+                console.log("मालिक ने पर्सनल असिस्टेंट मोड बंद किया।");
+            } else {
+                await client.sendMessage(senderId, 'पर्सनल असिस्टेंट मोड पहले से ही बंद है।');
+            }
+            return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
         }
-        // AI Assistant Replied prefix जोड़ें
-        await client.sendMessage(msg.from, `AI Assistant Replied: ${botResponseText}`);
-        console.log(`[बॉट का जवाब] ${msg.from}: "AI Assistant Replied: ${botResponseText}"`);
+
+        // यदि मालिक का मैसेज कोई कमांड नहीं है, और पर्सनल असिस्टेंट मोड ऑन है, तो AI जवाब दे
+        if (isPersonalAssistantMode) {
+            console.log('मालिक का मैसेज, पर्सनल असिस्टेंट मोड चालू है, बॉट जवाब देगा।');
+            await handleBotResponse(msg);
+            return;
+        } else {
+            console.log('मालिक का मैसेज, पर्सनल असिस्टेंट मोड बंद है, बॉट जवाब नहीं देगा।');
+            return; // पर्सनल असिस्टेंट मोड ऑफ है, इसलिए मालिक को जवाब न दें
+        }
+    }
+
+    // 3. यदि मैसेज मालिक का नहीं है, और मालिक ऑफ़लाइन है, तो AI जवाब दे
+    if (!isOwnerOnline) { // यह 'isOwnerOnline' Firestore से लोड किया गया मान है
+        console.log('मालिक ऑफ़लाइन है, बॉट अन्य यूज़र्स को जवाब देगा।');
+        await handleBotResponse(msg);
     } else {
-        console.log('मालिक ऑनलाइन है, बॉट जवाब नहीं देगा।');
+        console.log('मालिक ऑनलाइन है, बॉट अन्य यूज़र्स को जवाब नहीं देगा।');
     }
 });
+
+// बॉट प्रतिक्रिया उत्पन्न करने और भेजने के लिए एक सहायक फ़ंक्शन
+async function handleBotResponse(msg) {
+    const messageBody = msg.body;
+    let botResponseText = '';
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ""; // Render env var से प्राप्त करें
+
+    if (!GEMINI_API_KEY) {
+        botResponseText = 'क्षमा करें, AI कुंजी कॉन्फ़िगर नहीं है। मैं अभी आपके अनुरोध को संसाधित नहीं कर सकता।';
+    } else {
+        try {
+            const prompt = `मुझे इस उपयोगकर्ता के संदेश का एक संक्षिप्त, सहायक जवाब दें, यह मानते हुए कि मैं एक सहायक बॉट हूँ। संदेश: "${messageBody}"`;
+            let chatHistoryForGemini = [];
+            chatHistoryForGemini.push({ role: "user", parts: [{ text: prompt }] });
+
+            const payload = { contents: chatHistoryForGemini };
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`;
+
+            let response;
+            let result;
+            let retries = 0;
+            const maxRetries = 5;
+            const baseDelay = 1000; // 1 second
+
+            while (retries < maxRetries) {
+                try {
+                    response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    result = await response.json();
+                    if (result.candidates && result.candidates.length > 0 &&
+                        result.candidates[0].content && result.candidates[0].content.parts &&
+                        result.candidates[0].content.parts.length > 0) {
+                        botResponseText = result.candidates[0].content.parts[0].text;
+                        break; // सफलता, लूप से बाहर निकलें
+                    } else {
+                        console.warn("Gemini API ने अपेक्षित संरचना या सामग्री नहीं लौटाई।", result);
+                        botResponseText = 'क्षमा करें, मैं अभी आपके अनुरोध को समझ नहीं पा रहा हूँ।'; // फॉलबैक
+                        break; // इसे संभाला हुआ मानें, लेकिन फॉलबैक के साथ
+                    }
+                } catch (error) {
+                    console.error(`Gemini API कॉल में त्रुटि (प्रयास ${retries + 1}/${maxRetries}):`, error);
+                    retries++;
+                    if (retries < maxRetries) {
+                        const delay = baseDelay * Math.pow(2, retries - 1);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        console.log(`Gemini API कॉल का पुनः प्रयास कर रहा है (प्रयास ${retries}/${maxRetries})...`);
+                    } else {
+                        botResponseText = 'क्षमा करें, AI जवाब देने में असमर्थ है।'; // रिट्री के बाद फॉलबैक
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('बॉट मैसेज जनरेट करने या भेजने में त्रुटि:', error);
+            botResponseText = 'क्षमा करें, एक तकनीकी समस्या आ गई है।';
+        }
+    }
+    // AI Assistant Replied prefix जोड़ें
+    await msg.reply(`AI Assistant Replied: ${botResponseText}`); // msg.reply() सीधे मूल संदेश का जवाब देता है
+    console.log(`[बॉट का जवाब] ${msg.from}: "AI Assistant Replied: ${botResponseText}"`);
+}
+
 
 client.on('auth_failure', () => {
     console.error('प्रमाणीकरण विफल हुआ!');
     qrCodeData = 'प्रमाणीकरण विफल हुआ। कृपया सेवा पुनरारंभ करें या सत्र डेटा साफ़ करें।';
+    // Firestore में भी अपडेट करें
+    saveBotConfigToFirestore();
 });
 
 client.on('disconnected', (reason) => {
@@ -268,7 +305,7 @@ client.on('disconnected', (reason) => {
 app.get('/', async (req, res) => {
     // सुनिश्चित करें कि Firestore से स्थिति लोड हो गई है
     if (db && userId) {
-        await loadOwnerStatusFromFirestore();
+        await loadBotConfigFromFirestore();
     }
     
     if (isClientReady) {
@@ -292,12 +329,23 @@ app.get('/', async (req, res) => {
                             ${isOwnerOnline ? 'ऑनलाइन' : 'ऑफ़लाइन'}
                         </span>
                     </p>
+                    <p class="text-lg mb-2">पर्सनल असिस्टेंट मोड: 
+                        <span class="font-semibold ${isPersonalAssistantMode ? 'text-green-500' : 'text-red-500'}">
+                            ${isPersonalAssistantMode ? 'चालू' : 'बंद'}
+                        </span>
+                    </p>
                     <p class="text-gray-600 mb-6">बॉट सक्रिय है और मैसेजेस को हैंडल करने के लिए तैयार है।</p>
-                    <a href="/toggle_status" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 shadow-md">
-                        स्थिति टॉगल करें (अब आप ${isOwnerOnline ? 'ऑफ़लाइन' : 'ऑनलाइन'} होंगे)
-                    </a>
+                    <div class="space-y-4">
+                        <a href="/toggle_owner_status" class="block bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 shadow-md">
+                            मालिक की स्थिति टॉगल करें (अब आप ${isOwnerOnline ? 'ऑफ़लाइन' : 'ऑनलाइन'} होंगे)
+                        </a>
+                        <a href="/toggle_personal_assistant" class="block bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 shadow-md">
+                            पर्सनल असिस्टेंट मोड टॉगल करें (अब ${isPersonalAssistantMode ? 'बंद' : 'चालू'} होगा)
+                        </a>
+                    </div>
                     <p class="text-xs text-gray-500 mt-4">यह आपकी स्थिति को Firestore में सहेजेगा ताकि यह स्थायी रहे।</p>
-                    <p class="text-xs text-gray-500 mt-2">नोट: बॉट केवल तभी जवाब देगा जब आपकी स्थिति 'ऑफ़लाइन' हो।</p>
+                    <p class="text-xs text-gray-500 mt-2">नोट: बॉट अन्य यूज़र्स को तभी जवाब देगा जब आपकी मालिक की स्थिति 'ऑफ़लाइन' हो।</p>
+                    <p class="text-xs text-gray-500 mt-2">आप खुद को 'Online true', 'Online false', 'Assistant on', या 'Assistant off' मैसेज भेजकर भी स्थिति बदल सकते हैं।</p>
                 </div>
             </body>
             </html>
@@ -320,7 +368,7 @@ app.get('/', async (req, res) => {
                     <h1 class="text-3xl font-bold text-blue-600 mb-4">QR कोड स्कैन करें</h1>
                     <p class="text-lg text-gray-700 mb-6">कृपया अपने फ़ोन से WhatsApp खोलें, <b>Linked Devices</b> पर जाएं, और इस QR कोड को स्कैन करें।</p>
                     <img src="${qrCodeData}" alt="QR Code" class="mx-auto border-2 border-black p-4 rounded-lg shadow-md max-w-[80%] h-auto"/>
-                    <p class="text-sm text-gray-500 mt-6">यदि QR कोड लोड नहीं हो रहा है, तो कृपया Render लॉग्स देखें और कुछ मिनट प्रतीक्षा करें।</p>
+                    <p class="text-sm text-gray-500 mt-6">यदि QR कोड लोड नहीं हो रहा है, तो कृपया Render लॉग्स देखें और कुछ मिनट प्रतीक्षा करें। यह QR कोड Firestore में भी सहेजा गया है।</p>
                     <p class="text-xs text-red-500 mt-2">ध्यान दें: यह बॉट whatsapp-web.js लाइब्रेरी का उपयोग करता है जो QR कोड का उपयोग करता है, पेयरिंग कोड का नहीं।</p>
                 </div>
             </body>
@@ -329,15 +377,26 @@ app.get('/', async (req, res) => {
     }
 });
 
-// मालिक की स्थिति को बदलने के लिए API एंडपॉइंट (यह अभी भी काम करेगा, लेकिन WhatsApp कमांड अधिक सुविधाजनक है)
-app.get('/toggle_status', async (req, res) => {
+// मालिक की स्थिति को बदलने के लिए API एंडपॉइंट
+app.get('/toggle_owner_status', async (req, res) => {
     if (!db || !userId) {
         return res.status(500).send("Firebase इनिशियलाइज़ नहीं हुआ या यूजर ID उपलब्ध नहीं।");
     }
     isOwnerOnline = !isOwnerOnline;
-    await saveOwnerStatusToFirestore();
+    await saveBotConfigToFirestore();
     res.redirect('/'); // स्टेटस पेज पर रीडायरेक्ट करें
 });
+
+// पर्सनल असिस्टेंट मोड को बदलने के लिए API एंडपॉइंट
+app.get('/toggle_personal_assistant', async (req, res) => {
+    if (!db || !userId) {
+        return res.status(500).send("Firebase इनिशियलाइज़ नहीं हुआ या यूजर ID उपलब्ध नहीं।");
+    }
+    isPersonalAssistantMode = !isPersonalAssistantMode;
+    await saveBotConfigToFirestore();
+    res.redirect('/'); // स्टेटस पेज पर रीडायरेक्ट करें
+});
+
 
 // एक्सप्रेस सर्वर को शुरू करें
 app.listen(port, () => {
