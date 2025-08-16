@@ -209,14 +209,13 @@ client.on('message', async msg => {
             await handleBotResponse(msg);
             return;
         } else {
-            console.log('मालिक का मैसेज, पर्सनल असिस्टेंट मोड बंद है, बॉट जवाब नहीं देगा।');
-            return; // पर्सनल असिस्टेंट मोड ऑफ है, इसलिए मालिक को जवाब न दें
+            // पर्सनल असिस्टेंट मोड ऑफ है, इसलिए मालिक को जवाब न दें
+            return;
         }
     }
 
     // 3. यदि मैसेज मालिक का नहीं है, और मालिक ऑफ़लाइन है, तो AI जवाब दे
-    if (!isOwnerOnline) { // यह 'isOwnerOnline' Firestore से लोड किया गया मान है
-        // console.log('मालिक ऑफ़लाइन है, बॉट अन्य यूज़र्स को जवाब देगा।'); // यह मैसेज अब कंसोल में नहीं दिखेगा
+    if (!isOwnerOnline) { 
         await handleBotResponse(msg);
     } else {
         console.log('मालिक ऑनलाइन है, बॉट अन्य यूज़र्स को जवाब नहीं देगा।');
@@ -230,11 +229,11 @@ async function handleBotResponse(msg) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ""; // Render env var से प्राप्त करें
 
     if (!GEMINI_API_KEY) {
-        botResponseText = 'मालिक अभी उपलब्ध नहीं हैं और AI सहायक भी कॉन्फ़िगर नहीं है। कृपया थोड़ी देर बाद फिर से कोशिश करें।';
+        botResponseText = 'माफ़ करना, मैं अभी जवाब नहीं दे पा रहा हूँ। कृपया थोड़ी देर बाद फिर से कोशिश करें।';
     } else {
         try {
-            // प्रॉम्प्ट को दोस्ताना, देसी भाषा में जवाब देने के लिए अपडेट किया गया
-            const prompt = `इस संदेश का जवाब एक दोस्ताना, देसी और सहायक अंदाज़ में दें। मालिक अभी उपलब्ध नहीं है और मैं उनका सहायक बॉट हूँ। संदेश: "${messageBody}"`;
+            // प्रॉम्प्ट को छोटे, दोस्ताना और सामान्य यूज़र जैसे जवाब के लिए अपडेट किया गया
+            const prompt = `इस संदेश का जवाब एक छोटे, दोस्ताना, देसी और सहायक अंदाज़ में दें। इसे ऐसा लगना चाहिए जैसे कोई आम इंसान जवाब दे रहा हो। संदेश: "${messageBody}"`;
             let chatHistoryForGemini = [];
             chatHistoryForGemini.push({ role: "user", parts: [{ text: prompt }] });
 
@@ -262,7 +261,7 @@ async function handleBotResponse(msg) {
                         break; // सफलता, लूप से बाहर निकलें
                     } else {
                         console.warn("Gemini API ने अपेक्षित संरचना या सामग्री नहीं लौटाई।", result);
-                        botResponseText = 'माफ़ करना, मैं अभी आपकी बात नहीं समझ पा रहा हूँ। शायद मालिक जल्दी ही जवाब दें।'; // फॉलबैक
+                        botResponseText = 'माफ़ करना, मैं अभी आपकी बात नहीं समझ पा रहा हूँ।'; // फॉलबैक
                         break; // इसे संभाला हुआ मानें, लेकिन फॉलबैक के साथ
                     }
                 } catch (error) {
@@ -273,13 +272,13 @@ async function handleBotResponse(msg) {
                         await new Promise(resolve => setTimeout(resolve, delay));
                         console.log(`Gemini API कॉल का पुनः प्रयास कर रहा है (प्रयास ${retries}/${maxRetries})...`);
                     } else {
-                        botResponseText = 'माफ़ करना, AI जवाब देने में असमर्थ है। कुछ तकनीकी दिक्कत आ गई है।'; // रिट्री के बाद फॉलबैक
+                        botResponseText = 'माफ़ करना, कुछ तकनीकी दिक्कत आ गई है।'; // रिट्री के बाद फॉलबैक
                     }
                 }
             }
         } catch (error) {
             console.error('बॉट मैसेज जनरेट करने या भेजने में त्रुटि:', error);
-            botResponseText = 'माफ़ करना, एक तकनीकी समस्या आ गई है। मालिक को सूचित कर दिया गया है।';
+            botResponseText = 'माफ़ करना, एक तकनीकी समस्या आ गई है।';
         }
     }
     // 'AI Assistant Replied:' प्रीफिक्स हटा दिया गया है
