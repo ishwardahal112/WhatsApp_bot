@@ -57,7 +57,7 @@ if (Object.keys(firebaseConfig).length > 0) {
     userId = crypto.randomUUID(); // Firebase कॉन्फ़िग के बिना एक रैंडम ID उपयोग करें
 }
 
-// Firestore से बॉट कॉन्फ़िगरेशन लोड करें
+// Firestore से बॉट कॉन्फ़िग लोड करें
 async function loadBotConfigFromFirestore() {
     if (!db || !userId) {
         console.warn("Firestore या User ID उपलब्ध नहीं, कॉन्फ़िग लोड नहीं हो सकती।");
@@ -85,7 +85,7 @@ async function loadBotConfigFromFirestore() {
     }
 }
 
-// Firestore में बॉट कॉन्फ़िगरेशन सहेजें
+// Firestore में बॉट कॉन्फ़िग सहेजें
 async function saveBotConfigToFirestore() {
     if (!db || !userId) {
         console.warn("Firestore या User ID उपलब्ध नहीं, कॉन्फ़िग सहेजी नहीं जा सकती।");
@@ -230,7 +230,7 @@ async function handleBotResponse(msg) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ""; // Render env var से प्राप्त करें
 
     if (!GEMINI_API_KEY) {
-        botResponseText = 'क्षमा करें, AI कुंजी कॉन्फ़िगर नहीं है। मैं अभी आपके अनुरोध को संसाधित नहीं कर सकता।';
+        botResponseText = 'क्षमा करें, AI कुंजी कॉन्फ़िग नहीं है। मैं अभी आपके अनुरोध को संसाधित नहीं कर सकता।';
     } else {
         try {
             const prompt = `मुझे इस उपयोगकर्ता के संदेश का एक संक्षिप्त, सहायक जवाब दें, यह मानते हुए कि मैं एक सहायक बॉट हूँ। संदेश: "${messageBody}"`;
@@ -376,6 +376,12 @@ app.get('/', async (req, res) => {
         `);
     }
 });
+
+// नया, हल्का एंडपॉइंट केवल पिंगिंग के लिए
+app.get('/ping', (req, res) => {
+    res.send('OK'); // सिर्फ एक छोटा सा "ओके" जवाब भेजें
+});
+
 
 // मालिक की स्थिति को बदलने के लिए API एंडपॉइंट
 app.get('/toggle_owner_status', async (req, res) => {
