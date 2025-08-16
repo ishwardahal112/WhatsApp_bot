@@ -137,6 +137,7 @@ function initializeWhatsappClient() {
 
     client = new Client(clientOptions);
 
+    // ************* सभी client.on() लिसनर्स को यहां ले जाया गया *************
     client.on('qr', async qr => {
         console.log('QR कोड प्राप्त हुआ। इसे वेब पेज पर प्रदर्शित किया जाएगा और Firestore में सहेजा जाएगा।');
         qrCodeData = await qrcode.toDataURL(qr);
@@ -185,90 +186,91 @@ function initializeWhatsappClient() {
         console.log('WhatsApp डिस्कनेक्ट हो गया:', reason);
         // डिस्कनेक्ट होने पर सेशन साफ़ करें ताकि फिर से प्रमाणीकरण या नया QR स्कैन हो
         savedSession = null;
-        qrCodeData = 'डिस्कनेक्ट हो गया। कृपया सेवा पुनरारंभ करें और फिर से QR स्कैन करें।';
+        qrCodeData = 'QR कोड जनरेट नहीं हुआ है। कृपया प्रतीक्षा करें...'; // QR को रीसेट करें
         await saveBotConfigToFirestore();
         // client.initialize(); // वैकल्पिक: स्वचालित रूप से पुनः इनिशियलाइज़ करें
     });
 
+    // WhatsApp पर मैसेज आने पर
+    client.on('message', async msg => {
+        const messageBody = msg.body;
+        const senderId = msg.from; // भेजने वाले का पूरा ID (उदाहरण: "91XXXXXXXXXX@c.us")
+        const botOwnId = client.info && client.info.wid ? client.info.wid._serialized : null; // बॉट का अपना नंबर
+
+        console.log(`[मैसेज प्राप्त] ${senderId}: "${messageBody}"`);
+
+        // 1. यदि मैसेज बॉट द्वारा भेजा गया है, तो उसे अनदेखा करें
+        if (msg.fromMe) {
+            return;
+        }
+
+        // 2. मालिक द्वारा भेजे गए स्थिति परिवर्तन कमांड को हैंडल करें
+        if (botOwnId && senderId === botOwnId) { // केवल तभी जब मैसेज खुद मालिक से आया हो
+            const lowerCaseMessage = messageBody.toLowerCase().trim();
+
+            if (lowerCaseMessage === 'online true') {
+                if (!isOwnerOnline) {
+                    isOwnerOnline = true;
+                    await saveBotConfigToFirestore();
+                    await client.sendMessage(senderId, 'आपकी स्थिति अब: ऑनलाइन। बॉट अब अन्य यूज़र्स को जवाब नहीं देगा।');
+                    console.log("मालिक ने अपनी स्थिति ऑनलाइन पर सेट की।");
+                } else {
+                    await client.sendMessage(senderId, 'आप पहले से ही ऑनलाइन हैं।');
+                }
+                return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+            } else if (lowerCaseMessage === 'online false') {
+                if (isOwnerOnline) {
+                    isOwnerOnline = false;
+                    await saveBotConfigToFirestore();
+                    await client.sendMessage(senderId, 'आपकी स्थिति अब: ऑफ़लाइन। बॉट अब अन्य यूज़र्स को जवाब देगा।');
+                    console.log("मालिक ने अपनी स्थिति ऑफलाइन पर सेट की।");
+                } else {
+                    await client.sendMessage(senderId, 'आप पहले से ही ऑफ़लाइन हैं।');
+                }
+                return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+            } else if (lowerCaseMessage === 'assistant on') {
+                if (!isPersonalAssistantMode) {
+                    isPersonalAssistantMode = true;
+                    await saveBotConfigToFirestore();
+                    await client.sendMessage(senderId, 'आपका पर्सनल असिस्टेंट मोड अब चालू है। मैं आपके संदेशों का जवाब दूंगा।');
+                    console.log("मालिक ने पर्सनल असिस्टेंट मोड चालू किया।");
+                } else {
+                    await client.sendMessage(senderId, 'पर्सनल असिस्टेंट मोड पहले से ही चालू है।');
+                }
+                return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+            } else if (lowerCaseMessage === 'assistant off') {
+                if (isPersonalAssistantMode) {
+                    isPersonalAssistantMode = false;
+                    await saveBotConfigToFirestore();
+                    await client.sendMessage(senderId, 'आपका पर्सनल असिस्टेंट मोड अब बंद है। मैं आपके संदेशों का जवाब नहीं दूंगा।');
+                    console.log("मालिक ने पर्सनल असिस्टेंट मोड बंद किया।");
+                } else {
+                    await client.sendMessage(senderId, 'पर्सनल असिस्टेंट मोड पहले से ही बंद है।');
+                }
+                return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
+            }
+
+            // यदि मालिक का मैसेज कोई कमांड नहीं है, और पर्सनल असिस्टेंट मोड ऑन है, तो AI जवाब दे
+            if (isPersonalAssistantMode) {
+                console.log('मालिक का मैसेज, पर्सनल असिस्टेंट मोड चालू है, बॉट जवाब देगा।');
+                await handleBotResponse(msg);
+                return;
+            } else {
+                // पर्सनल असिस्टेंट मोड ऑफ है, इसलिए मालिक को जवाब न दें
+                return;
+            }
+        }
+
+        // 3. यदि मैसेज मालिक का नहीं है, और मालिक ऑफ़लाइन है, तो AI जवाब दे
+        if (!isOwnerOnline) { 
+            await handleBotResponse(msg);
+        } else {
+            // मालिक ऑनलाइन है, बॉट अन्य यूज़र्स को जवाब नहीं देगा।
+        }
+    });
+
     client.initialize(); // क्लाइंट को यहां इनिशियलाइज़ करें
 }
-
-client.on('message', async msg => {
-    const messageBody = msg.body;
-    const senderId = msg.from; // भेजने वाले का पूरा ID (उदाहरण: "91XXXXXXXXXX@c.us")
-    const botOwnId = client.info && client.info.wid ? client.info.wid._serialized : null; // बॉट का अपना नंबर
-
-    console.log(`[मैसेज प्राप्त] ${senderId}: "${messageBody}"`);
-
-    // 1. यदि मैसेज बॉट द्वारा भेजा गया है, तो उसे अनदेखा करें
-    if (msg.fromMe) {
-        return;
-    }
-
-    // 2. मालिक द्वारा भेजे गए स्थिति परिवर्तन कमांड को हैंडल करें
-    if (botOwnId && senderId === botOwnId) { // केवल तभी जब मैसेज खुद मालिक से आया हो
-        const lowerCaseMessage = messageBody.toLowerCase().trim();
-
-        if (lowerCaseMessage === 'online true') {
-            if (!isOwnerOnline) {
-                isOwnerOnline = true;
-                await saveBotConfigToFirestore();
-                await client.sendMessage(senderId, 'आपकी स्थिति अब: ऑनलाइन। बॉट अब अन्य यूज़र्स को जवाब नहीं देगा।');
-                console.log("मालिक ने अपनी स्थिति ऑनलाइन पर सेट की।");
-            } else {
-                await client.sendMessage(senderId, 'आप पहले से ही ऑनलाइन हैं।');
-            }
-            return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
-        } else if (lowerCaseMessage === 'online false') {
-            if (isOwnerOnline) {
-                isOwnerOnline = false;
-                await saveBotConfigToFirestore();
-                await client.sendMessage(senderId, 'आपकी स्थिति अब: ऑफ़लाइन। बॉट अब अन्य यूज़र्स को जवाब देगा।');
-                console.log("मालिक ने अपनी स्थिति ऑफलाइन पर सेट की।");
-            } else {
-                await client.sendMessage(senderId, 'आप पहले से ही ऑफ़लाइन हैं।');
-            }
-            return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
-        } else if (lowerCaseMessage === 'assistant on') {
-            if (!isPersonalAssistantMode) {
-                isPersonalAssistantMode = true;
-                await saveBotConfigToFirestore();
-                await client.sendMessage(senderId, 'आपका पर्सनल असिस्टेंट मोड अब चालू है। मैं आपके संदेशों का जवाब दूंगा।');
-                console.log("मालिक ने पर्सनल असिस्टेंट मोड चालू किया।");
-            } else {
-                await client.sendMessage(senderId, 'पर्सनल असिस्टेंट मोड पहले से ही चालू है।');
-            }
-            return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
-        } else if (lowerCaseMessage === 'assistant off') {
-            if (isPersonalAssistantMode) {
-                isPersonalAssistantMode = false;
-                await saveBotConfigToFirestore();
-                await client.sendMessage(senderId, 'आपका पर्सनल असिस्टेंट मोड अब बंद है। मैं आपके संदेशों का जवाब नहीं दूंगा।');
-                console.log("मालिक ने पर्सनल असिस्टेंट मोड बंद किया।");
-            } else {
-                await client.sendMessage(senderId, 'पर्सनल असिस्टेंट मोड पहले से ही बंद है।');
-            }
-            return; // कमांड को प्रोसेस किया गया, आगे कुछ न करें
-        }
-
-        // यदि मालिक का मैसेज कोई कमांड नहीं है, और पर्सनल असिस्टेंट मोड ऑन है, तो AI जवाब दे
-        if (isPersonalAssistantMode) {
-            console.log('मालिक का मैसेज, पर्सनल असिस्टेंट मोड चालू है, बॉट जवाब देगा।');
-            await handleBotResponse(msg);
-            return;
-        } else {
-            // पर्सनल असिस्टेंट मोड ऑफ है, इसलिए मालिक को जवाब न दें
-            return;
-        }
-    }
-
-    // 3. यदि मैसेज मालिक का नहीं है, और मालिक ऑफ़लाइन है, तो AI जवाब दे
-    if (!isOwnerOnline) { 
-        await handleBotResponse(msg);
-    } else {
-        // मालिक ऑनलाइन है, बॉट अन्य यूज़र्स को जवाब नहीं देगा।
-    }
-});
 
 // बॉट प्रतिक्रिया उत्पन्न करने और भेजने के लिए एक सहायक फ़ंक्शन
 async function handleBotResponse(msg) {
@@ -332,21 +334,6 @@ async function handleBotResponse(msg) {
     await msg.reply(botResponseText); // msg.reply() सीधे मूल संदेश का जवाब देता है
     console.log(`[बॉट का जवाब] ${msg.from}: "${botResponseText}"`);
 }
-
-
-client.on('auth_failure', async () => {
-    console.error('प्रमाणीकरण विफल हुआ!');
-    qrCodeData = 'प्रमाणीकरण विफल हुआ। कृपया सेवा पुनरारंभ करें और QR कोड को फिर से स्कैन करें।';
-    savedSession = null; // सेशन को साफ़ करें
-    await saveBotConfigToFirestore(); // Firestore में भी अपडेट करें
-});
-
-client.on('disconnected', async (reason) => {
-    console.log('WhatsApp डिस्कनेक्ट हो गया:', reason);
-    savedSession = null; // सेशन को साफ़ करें
-    qrCodeData = 'QR कोड जनरेट नहीं हुआ है। कृपया प्रतीक्षा करें...'; // QR को रीसेट करें
-    await saveBotConfigToFirestore();
-});
 
 
 // वेब सर्वर सेटअप
@@ -480,6 +467,7 @@ app.listen(port, async () => {
         initializeWhatsappClient(); // फिर WhatsApp क्लाइंट इनिशियलाइज़ करें
     } else {
         console.error("Firebase इनिशियलाइज़ नहीं हुआ, WhatsApp क्लाइंट शुरू नहीं हो सकता।");
-        initializeWhatsappClient(); // फिर भी क्लाइंट शुरू करने का प्रयास करें (बिना Firestore सेशन के, लेकिन यह स्थायी नहीं होगा)
+        // यदि Firebase इनिशियलाइज़ नहीं हुआ, तो भी क्लाइंट शुरू करने का प्रयास करें (सेशन परसिस्टेंस के बिना)
+        initializeWhatsappClient(); 
     }
 });
