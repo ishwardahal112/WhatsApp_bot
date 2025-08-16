@@ -100,8 +100,17 @@ async function saveBotConfigToFirestore() {
     const configDocRef = doc(db, `artifacts/${appId}/users/${userId}/whatsappBotConfig`, 'status');
     try {
         // सेशन ऑब्जेक्ट को JSON स्ट्रिंग के रूप में सहेजें
-        const sessionToSave = savedSession ? JSON.stringify(savedSession) : null;
-        await setDoc(configDocRef, { isOwnerOnline, isPersonalAssistantMode, lastQrCodeData: qrCodeData, session: sessionToSave });
+        // सुनिश्चित करें कि savedSession एक ऑब्जेक्ट है, अन्यथा null सेव करें
+        const sessionToSave = (typeof savedSession === 'object' && savedSession !== null) 
+                              ? JSON.stringify(savedSession) 
+                              : null;
+
+        await setDoc(configDocRef, { 
+            isOwnerOnline, 
+            isPersonalAssistantMode, 
+            lastQrCodeData: qrCodeData, 
+            session: sessionToSave // यह अब हमेशा एक स्ट्रिंग या null होगा
+        });
         console.log(`बॉट कॉन्फ़िग Firestore में सहेजी गई: मालिक ऑनलाइन=${isOwnerOnline}, पर्सनल असिस्टेंट मोड=${isPersonalAssistantMode}, सेशन सेव्ड=${!!sessionToSave}`);
     } catch (error) {
         console.error("Firestore में बॉट कॉन्फ़िग सहेजने में त्रुटि:", error);
@@ -146,9 +155,9 @@ function initializeWhatsappClient() {
     client.on('ready', async () => {
         isClientReady = true;
         console.log('WhatsApp क्लाइंट तैयार है! बॉट अब काम कर रहा है।');
-        // client.info मौजूद है या नहीं, इसकी जाँच करें
-        if (client.info && client.info.wid) { 
-            const botOwnId = client.info.wid._serialized; // बॉट का अपना WhatsApp ID
+        // client.info मौजूद है या नहीं, इसकी सुरक्षित जाँच करें
+        const botOwnId = client.info?.wid?._serialized || null; // सुरक्षित एक्सेस के लिए ऑप्शनल चेनिंग
+        if (botOwnId) { 
             try {
                 await client.sendMessage(botOwnId, 'बॉट सफलतापूर्वक कनेक्ट हो गया है और अब आपके पर्सनल असिस्टेंट के रूप में कार्य करने के लिए तैयार है!');
                 console.log(`कनेक्शन कन्फर्मेशन मैसेज ${botOwnId} को भेजा गया।`);
@@ -167,9 +176,9 @@ function initializeWhatsappClient() {
         qrCodeData = 'WhatsApp क्लाइंट प्रमाणित है और ऑनलाइन है!'; // वेब पेज पर स्थिति अपडेट करें
         await saveBotConfigToFirestore(); // सेशन ऑब्जेक्ट और अपडेटेड QR मैसेज को Firestore में सहेजें
         
-        // client.info मौजूद है या नहीं, इसकी जाँच करें
-        if (client.info && client.info.wid) {
-            const botOwnId = client.info.wid._serialized;
+        // client.info मौजूद है या नहीं, इसकी सुरक्षित जाँच करें
+        const botOwnId = client.info?.wid?._serialized || null; // सुरक्षित एक्सेस के लिए ऑप्शनल चेनिंग
+        if (botOwnId) {
             try {
                 await client.sendMessage(botOwnId, 'आपका WhatsApp सेशन अब सेव हो गया है! अब आपको बार-बार QR स्कैन करने की ज़रूरत नहीं पड़ेगी (जब तक आप मैन्युअल रूप से लॉगआउट न करें या सेशन अमान्य न हो जाए)।');
             } catch (error) {
@@ -198,7 +207,7 @@ function initializeWhatsappClient() {
     client.on('message', async msg => {
         const messageBody = msg.body;
         const senderId = msg.from; // भेजने वाले का पूरा ID (उदाहरण: "91XXXXXXXXXX@c.us")
-        const botOwnId = client.info && client.info.wid ? client.info.wid._serialized : null; // बॉट का अपना नंबर
+        const botOwnId = client.info?.wid?._serialized || null; // सुरक्षित एक्सेस के लिए ऑप्शनल चेनिंग
 
         console.log(`[मैसेज प्राप्त] ${senderId}: "${messageBody}"`);
 
@@ -282,7 +291,8 @@ async function handleBotResponse(msg) {
         botResponseText = 'माफ़ करना, मैं अभी जवाब नहीं दे पा रहा हूँ। कृपया थोड़ी देर बाद फिर से कोशिश करें।';
     } else {
         try {
-            const prompt = `इस संदेश का जवाब एक छोटे, दोस्ताना, देसी और सहायक अंदाज़ में दें। इसे ऐसा लगना चाहिए जैसे कोई आम इंसान जवाब दे रहा हो। संदेश: "${messageBody}"`;
+            // प्रॉम्प्ट को छोटे, दोस्ताना और सामान्य यूज़र जैसे जवाब के लिए अपडेट किया गया
+            const prompt = `उपयोगकर्ता के इस संदेश का एक छोटा, दोस्ताना और सीधा जवाब दें, जैसे कोई आम इंसान देगा। कोई विकल्प या सूची न दें। संदेश: "${messageBody}"`;
             let chatHistoryForGemini = [];
             chatHistoryForGemini.push({ role: "user", parts: [{ text: prompt }] });
 
@@ -455,13 +465,8 @@ app.get('/logout', async (req, res) => {
 app.listen(port, async () => {
     console.log(`सर्वर http://localhost:${port} पर चल रहा है`);
     if (db && userId) {
-        // Firebase Auth पूरा होने तक प्रतीक्षा करें
-        // loadBotConfigFromFirestore() signInUser() के अंदर कॉल किया जाता है,
-        // इसलिए सुनिश्चित करें कि signInUser() पहले चला हो और userId सेट हो।
-        // इसके लिए एक छोटी सी देरी या ऑन-स्टेट-चेंज लिसनर अधिक मजबूत हो सकता है।
-        // अभी के लिए, हम मान लेते हैं कि signInUser() जल्दी हो जाता है।
-        await loadBotConfigFromFirestore(); // पहले कॉन्फ़िग और सेशन लोड करें
-        initializeWhatsappClient(); // फिर WhatsApp क्लाइंट इनिशियलाइज़ करें
+        await loadBotConfigFromFirestore();
+        initializeWhatsappClient();
     } else {
         console.error("Firebase कॉन्फ़िग या USER ID उपलब्ध नहीं। WhatsApp क्लाइंट बिना परसिस्टेंस के शुरू होगा।");
         initializeWhatsappClient(); 
